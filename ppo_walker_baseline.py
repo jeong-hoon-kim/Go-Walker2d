@@ -76,15 +76,23 @@ if __name__ == "__main__":
     SEED = 42
 
     set_random_seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED) # 멀티-GPU 사용 시
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
     os.makedirs(SAVE_PATH, exist_ok=True)
     os.makedirs(LOG_PATH, exist_ok=True)
 
     # 훈련용 환경
     train_env = gym.make("Walker2d-v5")
     train_env = Monitor(train_env, SAVE_PATH)
+    train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5")
+    eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 사용 가능한 장치 확인 (GPU 우선)
     device = "cuda" if torch.cuda.is_available() else "cpu"
