@@ -86,7 +86,8 @@ def test_model(model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
     
     # 환경 생성
-    env = gym.make("Walker2d-v5", render_mode="rgb_array")
+    custom_xml_path = "C:/Users/qwer/Documents/Go-Walker2d/walker2d_slope.xml" # 경로 수정해야됨
+    env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     SAVE_PATH = FOLDER_NAME + f"/results/"
     LOG_PATH = FOLDER_NAME + "/logs/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 300000
+    TOTAL_TIMESTEPS = 21000
     SEED = 42
 
     set_random_seed(SEED)
@@ -152,12 +153,13 @@ if __name__ == "__main__":
     os.makedirs(LOG_PATH, exist_ok=True)
 
     # 훈련용 환경
-    train_env = gym.make("Walker2d-v5")
+    custom_xml_path = "C:/Users/qwer/Documents/Go-Walker2d/walker2d_slope.xml" # 경로 수정해야됨
+    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 평가용 환경
-    eval_env = gym.make("Walker2d-v5")
+    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 사용 가능한 장치 확인 (GPU 우선)
