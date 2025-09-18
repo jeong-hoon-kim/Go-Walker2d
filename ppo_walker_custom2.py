@@ -159,7 +159,11 @@ if __name__ == "__main__":
     SEED = 42
     utils.set_seed(SEED)
     
-    custom_xml_path = "C:/Users/Konyang/Go-Walker2d/walker2d_slope.xml" # 상대경로 왜 적용안되는지??
+    # xml 파일 경로 설정
+    current_file_path = os.path.abspath(__file__)
+    current_dir = os.path.dirname(current_file_path)
+    custom_xml_path = os.path.join(current_dir, 'walker2d_slope.xml')
+   
     # 훈련용 환경
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
@@ -171,7 +175,11 @@ if __name__ == "__main__":
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.action_space.seed(SEED)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
-    # 환경 생성
+    # 테스트 환경 생성
+    test_env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
+    test_env = CustomRewardWrapper(env=test_env)
+    test_env.action_space.seed(SEED)
+    test_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 사용 가능한 장치 확인 (cpu 우선)
     device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
@@ -211,25 +219,25 @@ if __name__ == "__main__":
 
     # 테스트
     test_model(
-        env=eval_env,
+        env=test_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=eval_env,
+        env=test_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=eval_env,
+        env=test_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=eval_env,
+        env=test_env,
         model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
