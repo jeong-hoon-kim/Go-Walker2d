@@ -158,14 +158,20 @@ if __name__ == "__main__":
     # 시드 설정
     SEED = 42
     utils.set_seed(SEED)
-
+    
+    custom_xml_path = "C:/Users/Konyang/Go-Walker2d/walker2d_slope.xml" # 상대경로 왜 적용안되는지??
+    # 훈련용 환경
+    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    train_env = Monitor(train_env, SAVE_PATH)
+    train_env = CustomRewardWrapper(env=train_env)
+    train_env.action_space.seed(SEED)
+    train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    # 평가용 환경
+    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomRewardWrapper(env=eval_env)
+    eval_env.action_space.seed(SEED)
+    eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     # 환경 생성
-    #custom_xml_path = "C:/Users/Konyang/Go-Walker2d/walker2d_slope.xml" # 상대경로 왜 적용안되는지??
-    env = gym.make("Walker2d-v5", render_mode="rgb_array")
-    env = CustomRewardWrapper(env=env)
-    env = Monitor(env, SAVE_PATH)
-    env.action_space.seed(SEED)
-    env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
     # 사용 가능한 장치 확인 (cpu 우선)
     device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
@@ -173,7 +179,7 @@ if __name__ == "__main__":
 
     # 콜백 설정
     callback = AdvancedEvalCallback(
-        env, 
+        eval_env, 
         save_path=SAVE_PATH, 
         eval_freq=20000, 
         n_eval_episodes=5, 
@@ -182,7 +188,7 @@ if __name__ == "__main__":
     # 모델 생성하기
     model = PPO(
         "MlpPolicy", 
-        env, 
+        train_env, 
         verbose=1, 
         seed=SEED, 
         device=device,
@@ -200,29 +206,30 @@ if __name__ == "__main__":
     model.save(f"{SAVE_PATH}ppo_walker2d_final.zip")
     print("최종 모델 저장이 완료되었습니다.")
 
-    env.close()
+    train_env.close()
+    eval_env.close()
 
     # 테스트
     test_model(
-        env=env,
+        env=eval_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=env,
+        env=eval_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=env,
+        env=eval_env,
         model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=env,
+        env=eval_env,
         model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
