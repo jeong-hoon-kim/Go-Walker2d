@@ -7,10 +7,9 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
-
 import os
 import datetime
-
+import utils
 
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
@@ -101,19 +100,14 @@ class AdvancedEvalCallback(BaseCallback):
         return True
 
 
-def test_model(model_path, seed, video_folder):
+def test_model(env, model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
-    
-    # 환경 생성
-    env = gym.make("Walker2d-v5", render_mode="rgb_array")
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
     model_name = os.path.splitext(os.path.basename(model_path))[0]
     video_prefix = f"{model_name}"
     env = RecordVideo(env, video_folder=video_folder, name_prefix=video_prefix, fps=30)
-    
-    env = CustomRewardWrapper(env)  # 커스텀 보상 래퍼 적용
 
     # 훈련된 모델 불러오기
     set_random_seed(seed)
@@ -160,36 +154,26 @@ if __name__ == "__main__":
     LOG_PATH = FOLDER_NAME + "/logs/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
     TOTAL_TIMESTEPS = 1000000
-    SEED = 42
-
-    set_random_seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED) # 멀티-GPU 사용 시
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
     
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    os.makedirs(LOG_PATH, exist_ok=True)
+    # 시드 설정
+    SEED = 42
+    utils.set_seed(SEED)
 
-    # 훈련용 환경
-    train_env = gym.make("Walker2d-v5")
-    train_env = CustomRewardWrapper(train_env)
-    train_env = Monitor(train_env, SAVE_PATH)
-    train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    # 환경 생성
+    #custom_xml_path = "C:/Users/Konyang/Go-Walker2d/walker2d_slope.xml" # 상대경로 왜 적용안되는지??
+    env = gym.make("Walker2d-v5", render_mode="rgb_array")
+    env = CustomRewardWrapper(env,seed=SEED)
+    env = Monitor(env, SAVE_PATH)
+    env.action_space.seed(SEED)
+    env.reset(seed=SEED) # 환경 초기화 시 시드 설정
 
-    # 평가용 환경
-    eval_env = gym.make("Walker2d-v5")
-    eval_env = CustomRewardWrapper(eval_env)
-    eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
-
-    # 사용 가능한 장치 확인 (GPU 우선)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 사용 가능한 장치 확인 (cpu 우선)
+    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     # 콜백 설정
     callback = AdvancedEvalCallback(
-        eval_env, 
+        env, 
         save_path=SAVE_PATH, 
         eval_freq=20000, 
         n_eval_episodes=5, 
@@ -198,7 +182,7 @@ if __name__ == "__main__":
     # 모델 생성하기
     model = PPO(
         "MlpPolicy", 
-        train_env, 
+        env, 
         verbose=1, 
         seed=SEED, 
         device=device,
@@ -216,26 +200,29 @@ if __name__ == "__main__":
     model.save(f"{SAVE_PATH}ppo_walker2d_final.zip")
     print("최종 모델 저장이 완료되었습니다.")
 
-    train_env.close()
-    eval_env.close()
+    env.close()
 
     # 테스트
     test_model(
+        env=env,
         model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        env=env,
         model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        env=env,
         model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        env=env,
         model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
