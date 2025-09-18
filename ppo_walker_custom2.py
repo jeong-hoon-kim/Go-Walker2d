@@ -100,27 +100,30 @@ class AdvancedEvalCallback(BaseCallback):
         return True
 
 
-def test_model(env, model_path, seed, video_folder):
+def test_model(xml, model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
+    
+    # 환경 생성
+    custom_xml_path = xml
+    env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
     model_name = os.path.splitext(os.path.basename(model_path))[0]
     video_prefix = f"{model_name}"
     env = RecordVideo(env, video_folder=video_folder, name_prefix=video_prefix, fps=30)
-
+    
     # 훈련된 모델 불러오기
     set_random_seed(seed)
     model = PPO.load(model_path, env=env)
     
     # 평가 시작
     obs, info = env.reset(seed=seed)
-    env.action_space.seed(seed)
     
     # 평가 지표 초기화
     torso_angles = []
-    total_reward = 0
-    final_distance = 0
+    total_reward = 0.0
+    final_distance = 0.0
     done = False
 
     while not done:
@@ -131,7 +134,7 @@ def test_model(env, model_path, seed, video_folder):
         # 평가 지표 수집
         torso_angle = obs[1]
         torso_angles.append(torso_angle)
-        total_reward += reward
+        total_reward += float(reward)
 
         if done:
             final_distance = info.get('x_position', 0)
@@ -154,7 +157,7 @@ if __name__ == "__main__":
     SAVE_PATH = FOLDER_NAME + f"/results/"
     LOG_PATH = FOLDER_NAME + "/logs/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 100000
+    TOTAL_TIMESTEPS = 20000
     
     # 시드 설정
     SEED = 42
@@ -176,11 +179,6 @@ if __name__ == "__main__":
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
-    # 테스트 환경 생성
-    test_env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
-    test_env = CustomRewardWrapper(env=test_env)
-    test_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
-    test_env.action_space.seed(SEED)
 
     # 사용 가능한 장치 확인 (cpu 우선)
     device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
@@ -220,25 +218,25 @@ if __name__ == "__main__":
 
     # 테스트
     test_model(
-        env=test_env,
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=test_env,
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=test_env,
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        env=test_env,
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
