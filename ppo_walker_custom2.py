@@ -14,15 +14,12 @@ import utils
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.time_step = 0
 
     def reset(self, **kwargs):
-        self.time_step = 0
         return self.env.reset(**kwargs)
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self.time_step += self.env.unwrapped.dt # 시뮬레이션 시간 업데이트
 
         new_reward = info["x_position"] * -1 # 뒤로걷기(테스트용)
         
@@ -174,14 +171,15 @@ if __name__ == "__main__":
     train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
+
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
 
-    # 사용 가능한 장치 확인 (cpu 우선)
-    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
+    # cpu 사용
+    device = "cpu"
     print(f"Using device: {device}")
 
     # 콜백 설정
