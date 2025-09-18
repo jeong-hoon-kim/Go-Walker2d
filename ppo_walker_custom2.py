@@ -162,7 +162,7 @@ if __name__ == "__main__":
     # 환경 생성
     #custom_xml_path = "C:/Users/Konyang/Go-Walker2d/walker2d_slope.xml" # 상대경로 왜 적용안되는지??
     env = gym.make("Walker2d-v5", render_mode="rgb_array")
-    env = CustomRewardWrapper(env,seed=SEED)
+    env = CustomRewardWrapper(env=env)
     env = Monitor(env, SAVE_PATH)
     env.action_space.seed(SEED)
     env.reset(seed=SEED) # 환경 초기화 시 시드 설정
