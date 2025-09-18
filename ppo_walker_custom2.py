@@ -115,6 +115,7 @@ def test_model(env, model_path, seed, video_folder):
     
     # 평가 시작
     obs, info = env.reset(seed=seed)
+    env.action_space.seed(seed)
     
     # 평가 지표 초기화
     torso_angles = []
@@ -153,7 +154,7 @@ if __name__ == "__main__":
     SAVE_PATH = FOLDER_NAME + f"/results/"
     LOG_PATH = FOLDER_NAME + "/logs/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 1000000
+    TOTAL_TIMESTEPS = 100000
     
     # 시드 설정
     SEED = 42
@@ -168,18 +169,18 @@ if __name__ == "__main__":
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
     train_env = CustomRewardWrapper(env=train_env)
-    train_env.action_space.seed(SEED)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    train_env.action_space.seed(SEED)
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     eval_env = CustomRewardWrapper(env=eval_env)
-    eval_env.action_space.seed(SEED)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    eval_env.action_space.seed(SEED)
     # 테스트 환경 생성
     test_env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
     test_env = CustomRewardWrapper(env=test_env)
-    test_env.action_space.seed(SEED)
     test_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    test_env.action_space.seed(SEED)
 
     # 사용 가능한 장치 확인 (cpu 우선)
     device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
