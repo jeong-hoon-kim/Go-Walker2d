@@ -2,6 +2,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
 import random
+import time
 import os
 
 def set_seed(seed: int = 42):
@@ -24,3 +25,17 @@ def set_seed(seed: int = 42):
     cudnn.benchmark = False
     
     print(f"seed set: {seed}")
+
+
+def print_log(message: str, log_path: str):
+    """
+    로그 메시지를 파일에 기록
+    """
+    log_path = log_path + ".txt"
+    
+    with open(log_path, 'a', encoding="UTF-8") as f:
+        t = time.strftime("%m-%d %H:%M:%S : ")
+        f.write(t + message + "\n")
+    print(message)
+
+    f.close()

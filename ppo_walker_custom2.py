@@ -21,7 +21,7 @@ class CustomRewardWrapper(Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        new_reward = info["x_position"] * -1 # 뒤로걷기(테스트용)
+        new_reward = reward
         
         return obs, new_reward, terminated, truncated, info
 
@@ -138,13 +138,13 @@ def test_model(xml, model_path, seed, video_folder):
     # 최종 결과 계산 및 출력
     stability_score = np.std(torso_angles)
 
-    print("\n--- 최종 평가 결과 ---")
-    print(f"모델: {model_path}")
-    print(f"최종 이동 거리: {final_distance:.2f} m")
-    print(f"총 보상: {total_reward:.2f}")
-    print(f"몸통 흔들림 (안정성): {stability_score:.4f} (낮을수록 안정적)")
-    print(f"영상 저장 위치: {video_folder}{video_prefix}.mp4")
-    print("-" * 30 + "\n")
+    utils.print_log("\n--- 최종 평가 결과 ---", model_path)
+    utils.print_log(f"모델: {model_path}", model_path)
+    utils.print_log(f"최종 이동 거리: {final_distance:.2f} m", model_path)
+    utils.print_log(f"총 보상: {total_reward:.2f}", model_path)
+    utils.print_log(f"몸통 흔들림 (안정성): {stability_score:.4f} (낮을수록 안정적)", model_path)
+    utils.print_log(f"영상 저장 위치: {video_folder}{video_prefix}.mp4", model_path)
+    utils.print_log("-" * 30 + "\n", model_path)
 
     env.close()
 
@@ -154,17 +154,17 @@ if __name__ == "__main__":
     SAVE_PATH = FOLDER_NAME + f"/results/"
     LOG_PATH = FOLDER_NAME + "/logs/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 20000
-    
-    # 시드 설정
-    SEED = 42
-    utils.set_seed(SEED)
+    TOTAL_TIMESTEPS = 1000000
     
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'walker2d_slope.xml')
-   
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml')
+    
+    # 시드 설정
+    SEED = 42
+    utils.set_seed(SEED)
+
     # 훈련용 환경
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
