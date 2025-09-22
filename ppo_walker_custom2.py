@@ -11,6 +11,7 @@ import os
 import datetime
 import utils
 
+## --- 커스텀 리워드 래퍼 정의 ---
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
@@ -20,13 +21,13 @@ class CustomRewardWrapper(Wrapper):
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-
+        # 이부분 수정하기
         new_reward = reward
         
         return obs, new_reward, terminated, truncated, info
 
 
-# --- 커스텀 평가 콜백 클래스 정의 ---
+## --- 커스텀 평가 콜백 클래스 정의 ---
 class AdvancedEvalCallback(BaseCallback):
     def __init__(self, eval_env, save_path, eval_freq, n_eval_episodes, verbose):
         super(AdvancedEvalCallback, self).__init__(verbose)
@@ -48,11 +49,15 @@ class AdvancedEvalCallback(BaseCallback):
                 done = False
                 torso_angles = []
                 final_distance = 0
+                episode_total_reward = 0.0 # 누적 보상 초기화
+
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = self.eval_env.step(action)
                     done = terminated or truncated
                     
+                    episode_total_reward += reward # 누적 보상 업데이트
+
                     # Walker2d-v5의 obs[1]는 몸통 각도(torso angle)입니다. (v3, v4와 다름)
                     torso_angles.append(obs[1]) 
                     if done: 
@@ -60,7 +65,7 @@ class AdvancedEvalCallback(BaseCallback):
                 
                 episode_distances.append(final_distance)
                 episode_stabilities.append(np.std(torso_angles))
-                episode_reward.append(reward)
+                episode_reward.append(episode_total_reward)
 
             mean_distance = np.mean(episode_distances)
             mean_stability = np.mean(episode_stabilities)
@@ -96,7 +101,7 @@ class AdvancedEvalCallback(BaseCallback):
         
         return True
 
-
+## --- 모델 테스트와 영상 녹화 ---
 def test_model(xml, model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
     
@@ -152,7 +157,7 @@ def test_model(xml, model_path, seed, video_folder):
 if __name__ == "__main__":
     FOLDER_NAME = "custom_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     SAVE_PATH = FOLDER_NAME + f"/results/"
-    LOG_PATH = FOLDER_NAME + "/logs/"
+    TENSORBOARD_PATH = FOLDER_NAME + "/tensorboard/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
     TOTAL_TIMESTEPS = 1000000
     
@@ -197,7 +202,7 @@ if __name__ == "__main__":
         verbose=1, 
         seed=SEED, 
         device=device,
-        tensorboard_log=LOG_PATH 
+        tensorboard_log=TENSORBOARD_PATH 
     )
 
     # 모델 학습시키기
