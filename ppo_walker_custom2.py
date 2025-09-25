@@ -159,12 +159,12 @@ if __name__ == "__main__":
     SAVE_PATH = FOLDER_NAME + f"/results/"
     TENSORBOARD_PATH = FOLDER_NAME + "/tensorboard/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 1000000
+    TOTAL_TIMESTEPS = 3000000
     
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml')
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
     
     # 시드 설정
     SEED = 42
