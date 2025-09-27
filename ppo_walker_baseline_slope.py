@@ -7,11 +7,27 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
-
 import os
 import datetime
+import utils
 
-# --- 커스텀 평가 콜백 클래스 정의 ---
+## --- 커스텀 리워드 래퍼 정의 ---
+class CustomRewardWrapper(Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        # 이부분 수정하기
+        new_reward = reward
+        
+        return obs, new_reward, terminated, truncated, info
+
+
+## --- 커스텀 평가 콜백 클래스 정의 ---
 class AdvancedEvalCallback(BaseCallback):
     def __init__(self, eval_env, save_path, eval_freq, n_eval_episodes, verbose):
         super(AdvancedEvalCallback, self).__init__(verbose)
@@ -33,11 +49,15 @@ class AdvancedEvalCallback(BaseCallback):
                 done = False
                 torso_angles = []
                 final_distance = 0
+                episode_total_reward = 0.0 # 누적 보상 초기화
+
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, info = self.eval_env.step(action)
                     done = terminated or truncated
                     
+                    episode_total_reward += reward # 누적 보상 업데이트
+
                     # Walker2d-v5의 obs[1]는 몸통 각도(torso angle)입니다. (v3, v4와 다름)
                     torso_angles.append(obs[1]) 
                     if done: 
@@ -45,7 +65,7 @@ class AdvancedEvalCallback(BaseCallback):
                 
                 episode_distances.append(final_distance)
                 episode_stabilities.append(np.std(torso_angles))
-                episode_reward.append(reward)
+                episode_reward.append(episode_total_reward)
 
             mean_distance = np.mean(episode_distances)
             mean_stability = np.mean(episode_stabilities)
@@ -81,12 +101,12 @@ class AdvancedEvalCallback(BaseCallback):
         
         return True
 
-
-def test_model(model_path, seed, video_folder):
+## --- 모델 테스트와 영상 녹화 ---
+def test_model(xml, model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
     
     # 환경 생성
-    custom_xml_path = "C:/Users/qwer/Documents/Go-Walker2d/walker2d_slope.xml" # 경로 수정해야됨
+    custom_xml_path = xml
     env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
     
     # 비디오 녹화 래퍼 적용
@@ -123,47 +143,48 @@ def test_model(model_path, seed, video_folder):
     # 최종 결과 계산 및 출력
     stability_score = np.std(torso_angles)
 
-    print("\n--- 최종 평가 결과 ---")
-    print(f"모델: {model_path}")
-    print(f"최종 이동 거리: {final_distance:.2f} m")
-    print(f"총 보상: {total_reward:.2f}")
-    print(f"몸통 흔들림 (안정성): {stability_score:.4f} (낮을수록 안정적)")
-    print(f"영상 저장 위치: {video_folder}{video_prefix}.mp4")
-    print("-" * 30 + "\n")
+    utils.print_log("\n--- 최종 평가 결과 ---", model_path)
+    utils.print_log(f"모델: {model_path}", model_path)
+    utils.print_log(f"최종 이동 거리: {final_distance:.2f} m", model_path)
+    utils.print_log(f"총 보상: {total_reward:.2f}", model_path)
+    utils.print_log(f"몸통 흔들림 (안정성): {stability_score:.4f} (낮을수록 안정적)", model_path)
+    utils.print_log(f"영상 저장 위치: {video_folder}{video_prefix}.mp4", model_path)
+    utils.print_log("-" * 30 + "\n", model_path)
 
     env.close()
 
 # --- 메인 훈련 코드 ---
 if __name__ == "__main__":
-    FOLDER_NAME = "baseline_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    FOLDER_NAME = "custom_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     SAVE_PATH = FOLDER_NAME + f"/results/"
-    LOG_PATH = FOLDER_NAME + "/logs/"
+    TENSORBOARD_PATH = FOLDER_NAME + "/tensorboard/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
-    TOTAL_TIMESTEPS = 21000
-    SEED = 42
-
-    set_random_seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED) # 멀티-GPU 사용 시
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    TOTAL_TIMESTEPS = 3000000
     
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    os.makedirs(LOG_PATH, exist_ok=True)
+    # xml 파일 경로 설정
+    current_file_path = os.path.abspath(__file__)
+    current_dir = os.path.dirname(current_file_path)
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
+    
+    # 시드 설정
+    SEED = 42
+    utils.set_seed(SEED)
 
     # 훈련용 환경
-    custom_xml_path = "C:/Users/qwer/Documents/Go-Walker2d/walker2d_slope.xml" # 경로 수정해야됨
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
+    train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    train_env.action_space.seed(SEED)
 
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
+    eval_env.action_space.seed(SEED)
 
-    # 사용 가능한 장치 확인 (GPU 우선)
-    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
+    # cpu 사용
+    device = "cpu"
     print(f"Using device: {device}")
 
     # 콜백 설정
@@ -181,7 +202,7 @@ if __name__ == "__main__":
         verbose=1, 
         seed=SEED, 
         device=device,
-        tensorboard_log=LOG_PATH 
+        tensorboard_log=TENSORBOARD_PATH 
     )
 
     # 모델 학습시키기
@@ -200,21 +221,25 @@ if __name__ == "__main__":
 
     # 테스트
     test_model(
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
+        xml=custom_xml_path,
         model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
