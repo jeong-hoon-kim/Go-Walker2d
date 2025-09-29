@@ -15,14 +15,46 @@ import utils
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
-
+        
+        self.knee_bend_weight = 0.3
+        
+        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
+        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
+        
     def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        # 이부분 수정하기
-        new_reward = reward
+        
+        # obs[1]: 몸통 기울기, obs[10]: 몸통 회전 속도
+        tilt_penalty = -2 * np.abs(obs[1])
+        shake_penalty = -0.5 * np.abs(obs[10])
+        
+        right_thigh_vel = obs[11] # 오른쪽 허벅지 속도
+        left_thigh_vel = obs[14]  # 왼쪽 허벅지 속도
+        right_knee_angle = np.abs(obs[3])
+        left_knee_angle = np.abs(obs[6])
+        
+        knee_bend_bonus = 0
+        
+        # 2. '오른쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
+        if right_thigh_vel > 0 and \
+           (self.knee_angle_min_rad < right_knee_angle < self.knee_angle_max_rad):
+            knee_bend_bonus += self.knee_bend_weight
+
+        # 3. '왼쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
+        if left_thigh_vel > 0 and \
+           (self.knee_angle_min_rad < left_knee_angle < self.knee_angle_max_rad):
+            knee_bend_bonus += self.knee_bend_weight
+        
+        new_reward = (
+            reward
+            + tilt_penalty
+            + shake_penalty
+            + knee_bend_bonus 
+        )
         
         return obs, new_reward, terminated, truncated, info
 
