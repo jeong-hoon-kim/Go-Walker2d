@@ -16,44 +16,46 @@ class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
         
-        self.knee_bend_weight = 0.3
+        # --- 🏆 속도 제어 하이퍼파라미터 ---
+        self.target_velocity = 1.4  # 목표 걷기 속도 (m/s)
+        self.velocity_tolerance = 0.2 # 속도 허용 오차 (이 값이 작을수록 엄격해짐)
+        self.velocity_reward_weight = 10 # 속도 보상의 최대 크기 (최대 보너스 점수)
         
-        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
-        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
-        
+        # --- 안정성 페널티 가중치 ---
+        self.stability_weight = 0.5
+
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return obs, info
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # obs[1]: 몸통 기울기, obs[10]: 몸통 회전 속도
-        tilt_penalty = -2 * np.abs(obs[1])
-        shake_penalty = -0.5 * np.abs(obs[10])
-        
-        right_thigh_vel = obs[11] # 오른쪽 허벅지 속도
-        left_thigh_vel = obs[14]  # 왼쪽 허벅지 속도
-        right_knee_angle = np.abs(obs[3])
-        left_knee_angle = np.abs(obs[6])
-        
-        knee_bend_bonus = 0
-        
-        # 2. '오른쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
-        if right_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < right_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
+        obs, original_reward, terminated, truncated, info = self.env.step(action)
 
-        # 3. '왼쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
-        if left_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < left_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
+        # 1. 기본 보상에서 '생존 보너스'와 '컨트롤 비용'만 가져옵니다.
+        # 기존의 '전진 보상'은 더 이상 사용하지 않습니다.
+        healthy_reward = info.get('reward_survive', 1.0)
+        ctrl_cost = info.get('reward_ctrl', 0)
+
+        # 2. 몸통 안정성 페널티 (유지)
+        stability_penalty = -self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
         
+        # --- 🏆 3. '속도 상한선' 보너스 계산 ---
+        
+        # 현재 전진 속도를 obs 벡터에서 가져옵니다.
+        current_velocity = obs[8]
+        
+        # 가우시안 함수를 이용해 보상 계산:
+        # 현재 속도가 target_velocity에 가까울수록 보상이 velocity_reward_weight에 가까워지고,
+        # 멀어질수록 0에 가까워집니다.
+        velocity_bonus = self.velocity_reward_weight * \
+                         np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
+
+        # 4. 모든 요소를 합산하여 최종 보상 계산
         new_reward = (
-            reward
-            + tilt_penalty
-            + shake_penalty
-            + knee_bend_bonus 
+            velocity_bonus
+            + healthy_reward 
+            + ctrl_cost
+            + stability_penalty
         )
         
         return obs, new_reward, terminated, truncated, info

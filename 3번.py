@@ -194,7 +194,7 @@ if __name__ == "__main__":
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml')
     
     # 시드 설정
     SEED = 42
