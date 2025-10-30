@@ -65,7 +65,7 @@ if __name__ == "__main__":
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
     XML_PATH = os.path.join(current_dir, 'xml/walker2d_base.xml')
-    MODEL_PATH = "custom_2025-10-02_13-10-19/results/ppo_walker2d_final.zip" 
+    MODEL_PATH = "custom_2025-10-27_11-05-55/results/ppo_walker2d_best_reward.zip" 
     SEED = 42
     VIDEO_FOLDER = "videos_test_custom/"
     

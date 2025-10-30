@@ -15,47 +15,82 @@ import utils
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
-
+        
+        self.knee_bend_weight = 0.3
+        
+        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
+        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
+        
     def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
 
     def step(self, action):
-        # 1. 내부 환경(Monitor -> BaseEnv)을 호출합니다.
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        # 1. 기본 환경의 step을 먼저 호출합니다.
+        # 💡 base_terminated는 '높이'와 '각도'가 모두 포함된 값입니다.
+        obs, base_reward, base_terminated, base_truncated, info = self.env.step(action)
 
-        # 2. '건강함(healthy)'을 '높이' 없이 '각도'로만 재정의합니다.
-        #    (이 부분은 사용자님 코드와 동일합니다)
+        # 2. 💡 '건강함(healthy)'을 '높이' 없이 '각도'로만 재정의합니다.
+        #    obs[1]은 몸통의 각도(qpos[2])입니다.
         is_angle_healthy = (obs[1] > -1.0) & (obs[1] < 1.0)
+        
+        # 3. 💡 우리가 원하는 새로운 '종료(terminated)' 조건을 계산합니다.
+        #    오직 '각도'가 범위를 벗어났을 때만 종료시킵니다.
         new_terminated = (not is_angle_healthy)
+
+        # 4. 💡 보상을 '완전히' 재조립합니다.
+        #    base_reward를 사용하지 않습니다. (높이 때문에 healthy_reward가 0이 됐을 수 있으므로)
         
-        # 3. '보상'을 재조립합니다.
-        #    (높이 제한으로 종료되면 기본 reward에 'survive_reward'가 빠져있으므로)
-        
-        # info에서 원본 보상 컴포넌트를 가져옵니다.
+        # 4a. 기본 보상 컴포넌트를 info에서 가져옵니다.
+        forward_reward = info.get('reward_run', 0.0)
         ctrl_cost = info.get('reward_ctrl', 0.0)
-        forward_reward = info.get('reward_run', 0.0) # 'reward_run' 또는 'reward_forward'
         
-        # 'healthy_reward' 값은 하드코딩하거나 unwrapped에서 가져옵니다.
+        # 4b. '생존 보상'을 우리의 '각도' 기준으로 새로 계산합니다.
         base_healthy_reward_value = self.env.unwrapped.healthy_reward # (보통 1.0)
-        
         healthy_reward = 0.0
         if is_angle_healthy: # '각도'가 건강할 때만 생존 보너스를 줍니다.
             healthy_reward = base_healthy_reward_value
+
+        # 4c. 사용자 정의 보상/페널티를 가져옵니다. (기존 코드와 동일)
+        tilt_penalty = -2 * np.abs(obs[1])
+        shake_penalty = -0.5 * np.abs(obs[10])
+        
+        right_thigh_vel = obs[11] # 오른쪽 허벅지 속도
+        left_thigh_vel = obs[14]  # 왼쪽 허벅지 속도
+        right_knee_angle = np.abs(obs[3])
+        left_knee_angle = np.abs(obs[6])
+        
+        knee_bend_bonus = 0
+        if right_thigh_vel > 0 and \
+           (self.knee_angle_min_rad < right_knee_angle < self.knee_angle_max_rad):
+            knee_bend_bonus += self.knee_bend_weight
+        if left_thigh_vel > 0 and \
+           (self.knee_angle_min_rad < left_knee_angle < self.knee_angle_max_rad):
+            knee_bend_bonus += self.knee_bend_weight
             
-        new_reward = forward_reward + healthy_reward + ctrl_cost
-
-        # --- 💡 4. '리셋 신호' 처리 (가장 중요) ---
-
-        # 4a. 우리가 정의한 '각도' 기준 종료는 'terminated'로 설정합니다.
+        # 4d. 모든 보상을 합산합니다.
+        new_reward = (
+            forward_reward      # 기본 전진 보상
+            + healthy_reward    # '각도' 기준 생존 보상
+            + ctrl_cost         # 기본 컨트롤 비용
+            + tilt_penalty      # 커스텀 페널티
+            + shake_penalty     # 커스텀 페널티
+            + knee_bend_bonus   # 커스텀 보너스
+        )
+        
+        # 5. 💡 'Monitor' 래퍼 오류 방지용 리셋 신호 처리 (중요)
+        #    이전 대화에서 다룬 'RuntimeError'를 방지하는 코드입니다.
+        
+        # 5a. 우리의 '각도' 기준 종료는 'terminated'로 설정합니다.
         final_terminated = new_terminated
         
-        # 4b. 'TimeLimit'에 의한 'truncated'는 그대로 존중합니다.
-        #     *또한*, 내부 환경(BaseEnv)이 '높이' 때문에 종료(terminated=True)됐지만,
+        # 5b. 'TimeLimit'에 의한 'truncated'는 그대로 존중합니다.
+        #     *또한*, 기본 환경이 '높이' 때문에 종료(base_terminated=True)됐지만,
         #     우리는 각도 때문에 종료가 아니라고(new_terminated=False) 판단한
         #     '데드락' 상태일 때, 'truncated=True'로 위장하여 VecEnv의 리셋을 강제합니다.
-        final_truncated = truncated or (terminated and not new_terminated)
+        final_truncated = base_truncated or (base_terminated and not new_terminated)
 
-        # 5. 최종 신호들을 반환합니다.
+        # 6. 최종 신호들을 반환합니다.
         return obs, new_reward, final_terminated, final_truncated, info
 
 
