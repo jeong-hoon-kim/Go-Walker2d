@@ -3,6 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
+from gymnasium.envs.mujoco import walker2d_v5
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
@@ -10,6 +11,42 @@ from stable_baselines3.common.callbacks import BaseCallback
 import os
 import datetime
 import utils
+
+class CustomWalkerEnv(walker2d_v5.Walker2dEnv):
+    """
+    원본 Walker2dEnv를 상속받아 is_healthy 로직만 수정한 커스텀 환경입니다.
+    """
+    # @property 데코레이터를 사용하여 is_healthy를 메서드가 아닌 속성처럼 다룹니다.
+    @property
+    def is_healthy(self):
+        """
+        여기에서 새로운 'healthy' 조건을 정의합니다.
+        원본 로직을 참고하여 수정하거나 완전히 새로 작성할 수 있습니다.
+        """
+        
+        # 원본 Walker2d-v5의 is_healthy 로직 (참고용)
+        # z, angle = self.data.qpos[1:3]
+
+        # min_z, max_z = self._healthy_z_range
+        # min_angle, max_angle = self._healthy_angle_range
+
+        # healthy_z = min_z < z < max_z
+        # healthy_angle = min_angle < angle < max_angle
+        # is_healthy = healthy_z and healthy_angle
+
+        # return is_healthy
+
+        z, angle = self.data.qpos[1:3]
+
+        min_z, max_z = (0.8, 200.0) # 수정된 z 범위
+        min_angle, max_angle = self._healthy_angle_range
+
+        healthy_z = min_z < z < max_z
+        healthy_angle = min_angle < angle < max_angle
+        is_healthy = healthy_z and healthy_angle
+
+        return is_healthy
+        
 
 ## --- 커스텀 리워드 래퍼 정의 ---
 class CustomRewardWrapper(Wrapper):
@@ -32,28 +69,10 @@ class CustomRewardWrapper(Wrapper):
         tilt_penalty = -2 * np.abs(obs[1])
         shake_penalty = -0.5 * np.abs(obs[10])
         
-        right_thigh_vel = obs[11] # 오른쪽 허벅지 속도
-        left_thigh_vel = obs[14]  # 왼쪽 허벅지 속도
-        right_knee_angle = np.abs(obs[3])
-        left_knee_angle = np.abs(obs[6])
-        
-        knee_bend_bonus = 0
-        
-        # 2. '오른쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
-        if right_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < right_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
-
-        # 3. '왼쪽 다리'가 앞으로 나아갈 때 (swing) 무릎이 굽혀져 있으면 보너스
-        if left_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < left_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
-        
         new_reward = (
             reward
             + tilt_penalty
             + shake_penalty
-            + knee_bend_bonus 
         )
         
         return obs, new_reward, terminated, truncated, info
@@ -203,14 +222,14 @@ if __name__ == "__main__":
     utils.set_seed(SEED)
 
     # 훈련용 환경
-    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    train_env = CustomWalkerEnv(xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
     train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
-    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomWalkerEnv(xml_file=custom_xml_path)
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)

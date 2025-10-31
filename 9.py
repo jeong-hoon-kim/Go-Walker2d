@@ -3,6 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
+from gymnasium.envs.mujoco import walker2d_v5
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
@@ -11,87 +12,138 @@ import os
 import datetime
 import utils
 
+class CustomWalkerEnv(walker2d_v5.Walker2dEnv):
+    """
+    원본 Walker2dEnv를 상속받아 is_healthy 로직만 수정한 커스텀 환경입니다.
+    """
+    # @property 데코레이터를 사용하여 is_healthy를 메서드가 아닌 속성처럼 다룹니다.
+    @property
+    def is_healthy(self):
+        """
+        여기에서 새로운 'healthy' 조건을 정의합니다.
+        원본 로직을 참고하여 수정하거나 완전히 새로 작성할 수 있습니다.
+        """
+        
+        # 원본 Walker2d-v5의 is_healthy 로직 (참고용)
+        # z, angle = self.data.qpos[1:3]
+
+        # min_z, max_z = self._healthy_z_range
+        # min_angle, max_angle = self._healthy_angle_range
+
+        # healthy_z = min_z < z < max_z
+        # healthy_angle = min_angle < angle < max_angle
+        # is_healthy = healthy_z and healthy_angle
+
+        # return is_healthy
+
+        z, angle = self.data.qpos[1:3]
+
+        min_z, max_z = (0.8, 200.0) # 수정된 z 범위
+        min_angle, max_angle = self._healthy_angle_range
+
+        healthy_z = min_z < z < max_z
+        healthy_angle = min_angle < angle < max_angle
+        is_healthy = healthy_z and healthy_angle
+
+        return is_healthy
+        
+
 ## --- 커스텀 리워드 래퍼 정의 ---
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
         
-        self.knee_bend_weight = 0.3
+        # --- 🏆 속도 제어 하이퍼파라미터 ---
+        self.target_velocity = 1.75  # 목표 걷기 속도 (m/s)
+        self.velocity_tolerance = 0.5 # 속도 허용 오차 (이 값이 작을수록 엄격해짐)
+        self.velocity_reward_weight = 2 # 속도 보상의 최대 크기 (최대 보너스 점수)
         
-        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
-        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
+        # --- 안정성 페널티 가중치 ---
+        self.stability_weight = 0.3
+        self.flight_penalty_weight = 1
         
+        self.left_foot_geom_id = self.env.unwrapped.model.geom('foot_left_geom').id
+        self.right_foot_geom_id = self.env.unwrapped.model.geom('foot_geom').id
+        
+        # 🏆 '지면'으로 인식할 모든 물체의 ID를 여기에 추가합니다.
+        # 'your_new_object_name'을 XML에 추가한 물체의 이름으로 바꾸세요.
+        self.ground_geom_ids = {
+            self.env.unwrapped.model.geom('floor').id,
+            self.env.unwrapped.model.geom('slope').id
+            # 필요시 여기에 더 많은 지면 물체 ID를 추가할 수 있습니다.
+        }
+        
+    def _check_foot_contact(self):
+        """두 발이 '지면'(ground_geom_ids)에 닿아있는지 확인하는 함수"""
+        left_contact = False
+        right_contact = False
+        
+        for contact in self.env.unwrapped.data.contact:
+            # 접촉한 두 물체의 ID
+            geom_pair = {contact.geom1, contact.geom2}
+            
+            # 🏆 이 접촉이 '지면'과 '발' 사이의 접촉인지 확인합니다.
+            
+            # 1. 접촉 쌍(geom_pair)에 '지면 ID' 중 하나라도 포함되어 있는지 확인
+            #    (isdisjoint()는 겹치는 요소가 없으면 True 반환)
+            is_ground_contact = not self.ground_geom_ids.isdisjoint(geom_pair)
+
+            if is_ground_contact:
+                # 2. '지면'과 접촉한 것이 확인되면,
+                #    접촉 쌍에 '발 ID'가 포함되어 있는지 확인
+                if self.left_foot_geom_id in geom_pair:
+                    left_contact = True
+                if self.right_foot_geom_id in geom_pair:
+                    right_contact = True
+            
+            # 두 발이 모두 확인되면 루프를 조기 종료할 수 있습니다 (선택적 최적화)
+            if left_contact and right_contact:
+                break
+                
+        return left_contact, right_contact
+
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return obs, info
 
     def step(self, action):
-        # 1. 기본 환경의 step을 먼저 호출합니다.
-        # 💡 base_terminated는 '높이'와 '각도'가 모두 포함된 값입니다.
-        obs, base_reward, base_terminated, base_truncated, info = self.env.step(action)
+        obs, original_reward, terminated, truncated, info = self.env.step(action)
 
-        # 2. 💡 '건강함(healthy)'을 '높이' 없이 '각도'로만 재정의합니다.
-        #    obs[1]은 몸통의 각도(qpos[2])입니다.
-        is_angle_healthy = (obs[1] > -1.0) & (obs[1] < 1.0)
-        
-        # 3. 💡 우리가 원하는 새로운 '종료(terminated)' 조건을 계산합니다.
-        #    오직 '각도'가 범위를 벗어났을 때만 종료시킵니다.
-        new_terminated = (not is_angle_healthy)
+        # 1. 기본 보상에서 '생존 보너스'와 '컨트롤 비용'만 가져옵니다.
+        # 기존의 '전진 보상'은 더 이상 사용하지 않습니다.
+        healthy_reward = info.get('reward_survive', 1.0)
+        ctrl_cost = info.get('reward_ctrl', 0)
 
-        # 4. 💡 보상을 '완전히' 재조립합니다.
-        #    base_reward를 사용하지 않습니다. (높이 때문에 healthy_reward가 0이 됐을 수 있으므로)
+        # 2. 몸통 안정성 페널티 (유지)
+        stability_penalty = -self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
         
-        # 4a. 기본 보상 컴포넌트를 info에서 가져옵니다.
-        forward_reward = info.get('reward_run', 0.0)
-        ctrl_cost = info.get('reward_ctrl', 0.0)
+        # --- 🏆 3. '속도 상한선' 보너스 계산 ---
         
-        # 4b. '생존 보상'을 우리의 '각도' 기준으로 새로 계산합니다.
-        base_healthy_reward_value = self.env.unwrapped.healthy_reward # (보통 1.0)
-        healthy_reward = 0.0
-        if is_angle_healthy: # '각도'가 건강할 때만 생존 보너스를 줍니다.
-            healthy_reward = base_healthy_reward_value
+        # 현재 전진 속도를 obs 벡터에서 가져옵니다.
+        current_velocity = obs[8]
+        
+        # 가우시안 함수를 이용해 보상 계산:
+        # 현재 속도가 target_velocity에 가까울수록 보상이 velocity_reward_weight에 가까워지고,
+        # 멀어질수록 0에 가까워집니다.
+        velocity_bonus = self.velocity_reward_weight * \
+                         np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
+                         
+        # --- 🏆 '공중 체공' 페널티 계산 ---
+        left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
+        flight_penalty = 0
+        if not left_foot_on_ground and not right_foot_on_ground:
+            flight_penalty = -self.flight_penalty_weight
 
-        # 4c. 사용자 정의 보상/페널티를 가져옵니다. (기존 코드와 동일)
-        tilt_penalty = -2 * np.abs(obs[1])
-        shake_penalty = -0.5 * np.abs(obs[10])
-        
-        right_thigh_vel = obs[11] # 오른쪽 허벅지 속도
-        left_thigh_vel = obs[14]  # 왼쪽 허벅지 속도
-        right_knee_angle = np.abs(obs[3])
-        left_knee_angle = np.abs(obs[6])
-        
-        knee_bend_bonus = 0
-        if right_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < right_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
-        if left_thigh_vel > 0 and \
-           (self.knee_angle_min_rad < left_knee_angle < self.knee_angle_max_rad):
-            knee_bend_bonus += self.knee_bend_weight
-            
-        # 4d. 모든 보상을 합산합니다.
+        # 4. 모든 요소를 합산하여 최종 보상 계산
         new_reward = (
-            forward_reward      # 기본 전진 보상
-            + healthy_reward    # '각도' 기준 생존 보상
-            + ctrl_cost         # 기본 컨트롤 비용
-            + tilt_penalty      # 커스텀 페널티
-            + shake_penalty     # 커스텀 페널티
-            + knee_bend_bonus   # 커스텀 보너스
+            velocity_bonus
+            + healthy_reward 
+            + ctrl_cost
+            + stability_penalty
+            + flight_penalty
         )
         
-        # 5. 💡 'Monitor' 래퍼 오류 방지용 리셋 신호 처리 (중요)
-        #    이전 대화에서 다룬 'RuntimeError'를 방지하는 코드입니다.
-        
-        # 5a. 우리의 '각도' 기준 종료는 'terminated'로 설정합니다.
-        final_terminated = new_terminated
-        
-        # 5b. 'TimeLimit'에 의한 'truncated'는 그대로 존중합니다.
-        #     *또한*, 기본 환경이 '높이' 때문에 종료(base_terminated=True)됐지만,
-        #     우리는 각도 때문에 종료가 아니라고(new_terminated=False) 판단한
-        #     '데드락' 상태일 때, 'truncated=True'로 위장하여 VecEnv의 리셋을 강제합니다.
-        final_truncated = base_truncated or (base_terminated and not new_terminated)
-
-        # 6. 최종 신호들을 반환합니다.
-        return obs, new_reward, final_terminated, final_truncated, info
+        return obs, new_reward, terminated, truncated, info
 
 
 ## --- 커스텀 평가 콜백 클래스 정의 ---
@@ -238,14 +290,14 @@ if __name__ == "__main__":
     utils.set_seed(SEED)
 
     # 훈련용 환경
-    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    train_env = CustomWalkerEnv(xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
     train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
-    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomWalkerEnv(xml_file=custom_xml_path)
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)

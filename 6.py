@@ -3,6 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
+from gymnasium.envs.mujoco import walker2d_v5
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
@@ -11,52 +12,58 @@ import os
 import datetime
 import utils
 
+class CustomWalkerEnv(walker2d_v5.Walker2dEnv):
+    """
+    원본 Walker2dEnv를 상속받아 is_healthy 로직만 수정한 커스텀 환경입니다.
+    """
+    # @property 데코레이터를 사용하여 is_healthy를 메서드가 아닌 속성처럼 다룹니다.
+    @property
+    def is_healthy(self):
+        """
+        여기에서 새로운 'healthy' 조건을 정의합니다.
+        원본 로직을 참고하여 수정하거나 완전히 새로 작성할 수 있습니다.
+        """
+        
+        # 원본 Walker2d-v5의 is_healthy 로직 (참고용)
+        # z, angle = self.data.qpos[1:3]
+
+        # min_z, max_z = self._healthy_z_range
+        # min_angle, max_angle = self._healthy_angle_range
+
+        # healthy_z = min_z < z < max_z
+        # healthy_angle = min_angle < angle < max_angle
+        # is_healthy = healthy_z and healthy_angle
+
+        # return is_healthy
+
+        z, angle = self.data.qpos[1:3]
+
+        min_z, max_z = (0.8, 200.0) # 수정된 z 범위
+        min_angle, max_angle = self._healthy_angle_range
+
+        healthy_z = min_z < z < max_z
+        healthy_angle = min_angle < angle < max_angle
+        is_healthy = healthy_z and healthy_angle
+
+        return is_healthy
+        
+
 ## --- 커스텀 리워드 래퍼 정의 ---
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
+        self.healthy_z_range = (0.8, 200.0)
+        
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
 
     def step(self, action):
-        # 1. 내부 환경(Monitor -> BaseEnv)을 호출합니다.
         obs, reward, terminated, truncated, info = self.env.step(action)
-
-        # 2. '건강함(healthy)'을 '높이' 없이 '각도'로만 재정의합니다.
-        #    (이 부분은 사용자님 코드와 동일합니다)
-        is_angle_healthy = (obs[1] > -1.0) & (obs[1] < 1.0)
-        new_terminated = (not is_angle_healthy)
+        # 이부분 수정하기
+        new_reward = reward
         
-        # 3. '보상'을 재조립합니다.
-        #    (높이 제한으로 종료되면 기본 reward에 'survive_reward'가 빠져있으므로)
-        
-        # info에서 원본 보상 컴포넌트를 가져옵니다.
-        ctrl_cost = info.get('reward_ctrl', 0.0)
-        forward_reward = info.get('reward_run', 0.0) # 'reward_run' 또는 'reward_forward'
-        
-        # 'healthy_reward' 값은 하드코딩하거나 unwrapped에서 가져옵니다.
-        base_healthy_reward_value = self.env.unwrapped.healthy_reward # (보통 1.0)
-        
-        healthy_reward = 0.0
-        if is_angle_healthy: # '각도'가 건강할 때만 생존 보너스를 줍니다.
-            healthy_reward = base_healthy_reward_value
-            
-        new_reward = forward_reward + healthy_reward + ctrl_cost
-
-        # --- 💡 4. '리셋 신호' 처리 (가장 중요) ---
-
-        # 4a. 우리가 정의한 '각도' 기준 종료는 'terminated'로 설정합니다.
-        final_terminated = new_terminated
-        
-        # 4b. 'TimeLimit'에 의한 'truncated'는 그대로 존중합니다.
-        #     *또한*, 내부 환경(BaseEnv)이 '높이' 때문에 종료(terminated=True)됐지만,
-        #     우리는 각도 때문에 종료가 아니라고(new_terminated=False) 판단한
-        #     '데드락' 상태일 때, 'truncated=True'로 위장하여 VecEnv의 리셋을 강제합니다.
-        final_truncated = truncated or (terminated and not new_terminated)
-
-        # 5. 최종 신호들을 반환합니다.
-        return obs, new_reward, final_terminated, final_truncated, info
+        return obs, new_reward, terminated, truncated, info
 
 
 ## --- 커스텀 평가 콜백 클래스 정의 ---
@@ -203,14 +210,14 @@ if __name__ == "__main__":
     utils.set_seed(SEED)
 
     # 훈련용 환경
-    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    train_env = CustomWalkerEnv(xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
     train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
-    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomWalkerEnv(xml_file=custom_xml_path)
     eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
