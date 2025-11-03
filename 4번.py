@@ -58,7 +58,7 @@ class CustomRewardWrapper(Wrapper):
         ctrl_cost = info.get('reward_ctrl', 0)
 
         # 2. 몸통 안정성 페널티 (유지)
-        stability_penalty = -self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
+        stability_penalty = self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
         
         # --- 🏆 3. '속도 상한선' 보너스 계산 ---
         
@@ -75,15 +75,15 @@ class CustomRewardWrapper(Wrapper):
         left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
         flight_penalty = 0
         if not left_foot_on_ground and not right_foot_on_ground:
-            flight_penalty = -self.flight_penalty_weight
+            flight_penalty = self.flight_penalty_weight
 
         # 4. 모든 요소를 합산하여 최종 보상 계산
         new_reward = (
             velocity_bonus
             + healthy_reward 
             + ctrl_cost
-            + stability_penalty
-            + flight_penalty
+            - stability_penalty
+            - flight_penalty
         )
         
         return obs, new_reward, terminated, truncated, info
