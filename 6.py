@@ -52,7 +52,6 @@ class CustomWalkerEnv(walker2d_v5.Walker2dEnv):
 class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.healthy_z_range = (0.8, 200.0)
         
 
     def reset(self, **kwargs):
@@ -147,6 +146,7 @@ def test_model(xml, model_path, seed, video_folder):
     # 환경 생성
     custom_xml_path = xml
     env = CustomWalkerEnv(render_mode="rgb_array", xml_file=custom_xml_path)
+    env = CustomRewardWrapper(env=env)
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
