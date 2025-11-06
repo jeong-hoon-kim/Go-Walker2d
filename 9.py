@@ -73,34 +73,34 @@ class CustomRewardWrapper(Wrapper):
             # 필요시 여기에 더 많은 지면 물체 ID를 추가할 수 있습니다.
         }
         
-    def _check_foot_contact(self):
-        """두 발이 '지면'(ground_geom_ids)에 닿아있는지 확인하는 함수"""
-        left_contact = False
-        right_contact = False
+    # def _check_foot_contact(self):
+    #     """두 발이 '지면'(ground_geom_ids)에 닿아있는지 확인하는 함수"""
+    #     left_contact = False
+    #     right_contact = False
         
-        for contact in self.env.unwrapped.data.contact:
-            # 접촉한 두 물체의 ID
-            geom_pair = {contact.geom1, contact.geom2}
+    #     for contact in self.env.unwrapped.data.contact:
+    #         # 접촉한 두 물체의 ID
+    #         geom_pair = {contact.geom1, contact.geom2}
             
-            # 🏆 이 접촉이 '지면'과 '발' 사이의 접촉인지 확인합니다.
+    #         # 🏆 이 접촉이 '지면'과 '발' 사이의 접촉인지 확인합니다.
             
-            # 1. 접촉 쌍(geom_pair)에 '지면 ID' 중 하나라도 포함되어 있는지 확인
-            #    (isdisjoint()는 겹치는 요소가 없으면 True 반환)
-            is_ground_contact = not self.ground_geom_ids.isdisjoint(geom_pair)
+    #         # 1. 접촉 쌍(geom_pair)에 '지면 ID' 중 하나라도 포함되어 있는지 확인
+    #         #    (isdisjoint()는 겹치는 요소가 없으면 True 반환)
+    #         is_ground_contact = not self.ground_geom_ids.isdisjoint(geom_pair)
 
-            if is_ground_contact:
-                # 2. '지면'과 접촉한 것이 확인되면,
-                #    접촉 쌍에 '발 ID'가 포함되어 있는지 확인
-                if self.left_foot_geom_id in geom_pair:
-                    left_contact = True
-                if self.right_foot_geom_id in geom_pair:
-                    right_contact = True
+    #         if is_ground_contact:
+    #             # 2. '지면'과 접촉한 것이 확인되면,
+    #             #    접촉 쌍에 '발 ID'가 포함되어 있는지 확인
+    #             if self.left_foot_geom_id in geom_pair:
+    #                 left_contact = True
+    #             if self.right_foot_geom_id in geom_pair:
+    #                 right_contact = True
             
-            # 두 발이 모두 확인되면 루프를 조기 종료할 수 있습니다 (선택적 최적화)
-            if left_contact and right_contact:
-                break
+    #         # 두 발이 모두 확인되면 루프를 조기 종료할 수 있습니다 (선택적 최적화)
+    #         if left_contact and right_contact:
+    #             break
                 
-        return left_contact, right_contact
+    #     return left_contact, right_contact
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
@@ -129,10 +129,10 @@ class CustomRewardWrapper(Wrapper):
                          np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
                          
         # --- 🏆 '공중 체공' 페널티 계산 ---
-        left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
+        # left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
         flight_penalty = 0
-        if not left_foot_on_ground and not right_foot_on_ground:
-            flight_penalty = -self.flight_penalty_weight
+        # if not left_foot_on_ground and not right_foot_on_ground:
+            # flight_penalty = -self.flight_penalty_weight
 
         # 4. 모든 요소를 합산하여 최종 보상 계산
         new_reward = (
@@ -226,7 +226,7 @@ def test_model(xml, model_path, seed, video_folder):
     
     # 환경 생성
     custom_xml_path = xml
-    env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
+    env = CustomWalkerEnv(render_mode="rgb_array", xml_file=custom_xml_path)
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
