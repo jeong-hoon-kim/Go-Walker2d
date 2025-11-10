@@ -3,28 +3,13 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
 import os
 import datetime
 import utils
-
-## --- 커스텀 리워드 래퍼 정의 ---
-class CustomRewardWrapper(Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
-
-    def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        # 이부분 수정하기
-        new_reward = reward
-        
-        return obs, new_reward, terminated, truncated, info
 
 
 ## --- 커스텀 평가 콜백 클래스 정의 ---
@@ -82,19 +67,19 @@ class AdvancedEvalCallback(BaseCallback):
             # 최고 이동 거리 모델 저장
             if mean_distance > self.best_mean_distance:
                 self.best_mean_distance = mean_distance
-                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_distance.zip"))
+                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_distance.zip"))
                 if self.verbose > 0: print(f"  >> New best distance model saved: {mean_distance:.2f} m")
 
             # 최고 안정성 모델 저장
             if mean_stability < self.best_mean_stability:
                 self.best_mean_stability = mean_stability
-                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_stability.zip"))
+                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_stability.zip"))
                 if self.verbose > 0: print(f"  >> New best stability model saved: {mean_stability:.4f}")
             
             # 최고 보상 모델 저장
             if mean_reward > self.best_reward:
                 self.best_reward = mean_reward
-                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_reward.zip"))
+                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_reward.zip"))
                 if self.verbose > 0: print(f"  >> New best reward model saved: {mean_reward:.2f}")
             
             print("---------------------------------")
@@ -117,7 +102,7 @@ def test_model(xml, model_path, seed, video_folder):
     
     # 훈련된 모델 불러오기
     set_random_seed(seed)
-    model = PPO.load(model_path, env=env)
+    model = SAC.load(model_path, env=env)
     
     # 평가 시작
     obs, info = env.reset(seed=seed)
@@ -164,7 +149,7 @@ if __name__ == "__main__":
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml') # 기본 xml (평지)
     
     # 시드 설정
     SEED = 42
@@ -173,13 +158,11 @@ if __name__ == "__main__":
     # 훈련용 환경
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
-    train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
-    eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
 
@@ -196,7 +179,7 @@ if __name__ == "__main__":
         verbose=1)
 
     # 모델 생성하기
-    model = PPO(
+    model = SAC(
         "MlpPolicy", 
         train_env, 
         verbose=1, 
@@ -209,11 +192,11 @@ if __name__ == "__main__":
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         callback=callback,
-        tb_log_name="ppo_walker2d"
+        tb_log_name="sac_walker2d"
     )
 
     # 최종 모델 저장하기
-    model.save(f"{SAVE_PATH}ppo_walker2d_final.zip")
+    model.save(f"{SAVE_PATH}sac_walker2d_final.zip")
     print("최종 모델 저장이 완료되었습니다.")
 
     train_env.close()
@@ -222,25 +205,25 @@ if __name__ == "__main__":
     # 테스트
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_distance",
+        model_path=SAVE_PATH + "sac_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_stability",
+        model_path=SAVE_PATH + "sac_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_reward",
+        model_path=SAVE_PATH + "sac_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_final",
+        model_path=SAVE_PATH + "sac_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
     )

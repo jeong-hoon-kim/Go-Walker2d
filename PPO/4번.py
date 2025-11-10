@@ -3,13 +3,90 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
-from stable_baselines3 import SAC
+from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
 import os
 import datetime
 import utils
+
+## --- 커스텀 리워드 래퍼 정의 ---
+class CustomRewardWrapper(Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        
+        # --- 🏆 속도 제어 하이퍼파라미터 ---
+        self.target_velocity = 1.75  # 목표 걷기 속도 (m/s)
+        self.velocity_tolerance = 0.5 # 속도 허용 오차 (이 값이 작을수록 엄격해짐)
+        self.velocity_reward_weight = 2 # 속도 보상의 최대 크기 (최대 보너스 점수)
+        
+        # --- 안정성 페널티 가중치 ---
+        self.stability_weight = 0.3
+        self.flight_penalty_weight = 1
+        
+        # MuJoCo 시뮬레이션에서 발과 바닥의 ID를 미리 찾아둡니다.
+        self.left_foot_geom_id = self.env.unwrapped.model.geom('foot_left_geom').id
+        self.right_foot_geom_id = self.env.unwrapped.model.geom('foot_geom').id
+        self.floor_geom_id = self.env.unwrapped.model.geom('floor').id
+        
+    def _check_foot_contact(self):
+        """두 발이 바닥에 닿아있는지 확인하는 함수"""
+        left_contact = False
+        right_contact = False
+        
+        for contact in self.env.unwrapped.data.contact:
+            geom_pair = {contact.geom1, contact.geom2}
+            
+            if self.left_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair:
+                left_contact = True
+            if self.right_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair:
+                right_contact = True
+        
+        return left_contact, right_contact
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
+
+    def step(self, action):
+        obs, original_reward, terminated, truncated, info = self.env.step(action)
+
+        # 1. 기본 보상에서 '생존 보너스'와 '컨트롤 비용'만 가져옵니다.
+        # 기존의 '전진 보상'은 더 이상 사용하지 않습니다.
+        healthy_reward = info.get('reward_survive', 1.0)
+        ctrl_cost = info.get('reward_ctrl', 0)
+
+        # 2. 몸통 안정성 페널티 (유지)
+        stability_penalty = self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
+        
+        # --- 🏆 3. '속도 상한선' 보너스 계산 ---
+        
+        # 현재 전진 속도를 obs 벡터에서 가져옵니다.
+        current_velocity = obs[8]
+        
+        # 가우시안 함수를 이용해 보상 계산:
+        # 현재 속도가 target_velocity에 가까울수록 보상이 velocity_reward_weight에 가까워지고,
+        # 멀어질수록 0에 가까워집니다.
+        velocity_bonus = self.velocity_reward_weight * \
+                         np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
+                         
+        # --- 🏆 '공중 체공' 페널티 계산 ---
+        left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
+        flight_penalty = 0
+        if not left_foot_on_ground and not right_foot_on_ground:
+            flight_penalty = self.flight_penalty_weight
+
+        # 4. 모든 요소를 합산하여 최종 보상 계산
+        new_reward = (
+            velocity_bonus
+            + healthy_reward 
+            + ctrl_cost
+            - stability_penalty
+            - flight_penalty
+        )
+        
+        return obs, new_reward, terminated, truncated, info
 
 
 ## --- 커스텀 평가 콜백 클래스 정의 ---
@@ -67,19 +144,19 @@ class AdvancedEvalCallback(BaseCallback):
             # 최고 이동 거리 모델 저장
             if mean_distance > self.best_mean_distance:
                 self.best_mean_distance = mean_distance
-                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_distance.zip"))
+                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_distance.zip"))
                 if self.verbose > 0: print(f"  >> New best distance model saved: {mean_distance:.2f} m")
 
             # 최고 안정성 모델 저장
             if mean_stability < self.best_mean_stability:
                 self.best_mean_stability = mean_stability
-                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_stability.zip"))
+                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_stability.zip"))
                 if self.verbose > 0: print(f"  >> New best stability model saved: {mean_stability:.4f}")
             
             # 최고 보상 모델 저장
             if mean_reward > self.best_reward:
                 self.best_reward = mean_reward
-                self.model.save(os.path.join(self.save_path, "sac_walker2d_best_reward.zip"))
+                self.model.save(os.path.join(self.save_path, "ppo_walker2d_best_reward.zip"))
                 if self.verbose > 0: print(f"  >> New best reward model saved: {mean_reward:.2f}")
             
             print("---------------------------------")
@@ -93,6 +170,7 @@ def test_model(xml, model_path, seed, video_folder):
     # 환경 생성
     custom_xml_path = xml
     env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
+    env = CustomRewardWrapper(env=env)
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
@@ -102,7 +180,7 @@ def test_model(xml, model_path, seed, video_folder):
     
     # 훈련된 모델 불러오기
     set_random_seed(seed)
-    model = SAC.load(model_path, env=env)
+    model = PPO.load(model_path, env=env)
     
     # 평가 시작
     obs, info = env.reset(seed=seed)
@@ -149,7 +227,7 @@ if __name__ == "__main__":
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml') # 기본 xml (평지)
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_base.xml')
     
     # 시드 설정
     SEED = 42
@@ -158,11 +236,13 @@ if __name__ == "__main__":
     # 훈련용 환경
     train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
     train_env = Monitor(train_env, SAVE_PATH)
+    train_env = CustomRewardWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
     eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    eval_env = CustomRewardWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
 
@@ -179,7 +259,7 @@ if __name__ == "__main__":
         verbose=1)
 
     # 모델 생성하기
-    model = SAC(
+    model = PPO(
         "MlpPolicy", 
         train_env, 
         verbose=1, 
@@ -192,11 +272,11 @@ if __name__ == "__main__":
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         callback=callback,
-        tb_log_name="sac_walker2d"
+        tb_log_name="ppo_walker2d"
     )
 
     # 최종 모델 저장하기
-    model.save(f"{SAVE_PATH}sac_walker2d_final.zip")
+    model.save(f"{SAVE_PATH}ppo_walker2d_final.zip")
     print("최종 모델 저장이 완료되었습니다.")
 
     train_env.close()
@@ -205,25 +285,25 @@ if __name__ == "__main__":
     # 테스트
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "sac_walker2d_best_distance",
+        model_path=SAVE_PATH + "ppo_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "sac_walker2d_best_stability",
+        model_path=SAVE_PATH + "ppo_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "sac_walker2d_best_reward",
+        model_path=SAVE_PATH + "ppo_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
         xml=custom_xml_path,
-        model_path=SAVE_PATH + "sac_walker2d_final",
+        model_path=SAVE_PATH + "ppo_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
     )

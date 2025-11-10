@@ -53,95 +53,14 @@ class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
         
-        # --- 🏆 속도 제어 하이퍼파라미터 ---
-        self.target_velocity = 1.75  # 목표 걷기 속도 (m/s)
-        self.velocity_tolerance = 0.5 # 속도 허용 오차 (이 값이 작을수록 엄격해짐)
-        self.velocity_reward_weight = 2 # 속도 보상의 최대 크기 (최대 보너스 점수)
-        
-        # --- 안정성 페널티 가중치 ---
-        self.stability_weight = 0.3
-        self.flight_penalty_weight = 1
-        
-        self.left_foot_geom_id = self.env.unwrapped.model.geom('foot_left_geom').id
-        self.right_foot_geom_id = self.env.unwrapped.model.geom('foot_geom').id
-        
-        # 🏆 '지면'으로 인식할 모든 물체의 ID를 여기에 추가합니다.
-        # 'your_new_object_name'을 XML에 추가한 물체의 이름으로 바꾸세요.
-        self.ground_geom_ids = {
-            self.env.unwrapped.model.geom('floor').id,
-            self.env.unwrapped.model.geom('slope').id
-            # 필요시 여기에 더 많은 지면 물체 ID를 추가할 수 있습니다.
-        }
-        
-    # def _check_foot_contact(self):
-    #     """두 발이 '지면'(ground_geom_ids)에 닿아있는지 확인하는 함수"""
-    #     left_contact = False
-    #     right_contact = False
-        
-    #     for contact in self.env.unwrapped.data.contact:
-    #         # 접촉한 두 물체의 ID
-    #         geom_pair = {contact.geom1, contact.geom2}
-            
-    #         # 🏆 이 접촉이 '지면'과 '발' 사이의 접촉인지 확인합니다.
-            
-    #         # 1. 접촉 쌍(geom_pair)에 '지면 ID' 중 하나라도 포함되어 있는지 확인
-    #         #    (isdisjoint()는 겹치는 요소가 없으면 True 반환)
-    #         is_ground_contact = not self.ground_geom_ids.isdisjoint(geom_pair)
-
-    #         if is_ground_contact:
-    #             # 2. '지면'과 접촉한 것이 확인되면,
-    #             #    접촉 쌍에 '발 ID'가 포함되어 있는지 확인
-    #             if self.left_foot_geom_id in geom_pair:
-    #                 left_contact = True
-    #             if self.right_foot_geom_id in geom_pair:
-    #                 right_contact = True
-            
-    #         # 두 발이 모두 확인되면 루프를 조기 종료할 수 있습니다 (선택적 최적화)
-    #         if left_contact and right_contact:
-    #             break
-                
-    #     return left_contact, right_contact
 
     def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        return obs, info
+        return self.env.reset(**kwargs)
 
     def step(self, action):
-        obs, original_reward, terminated, truncated, info = self.env.step(action)
-
-        # 1. 기본 보상에서 '생존 보너스'와 '컨트롤 비용'만 가져옵니다.
-        # 기존의 '전진 보상'은 더 이상 사용하지 않습니다.
-        healthy_reward = info.get('reward_survive', 1.0)
-        ctrl_cost = info.get('reward_ctrl', 0)
-
-        # 2. 몸통 안정성 페널티 (유지)
-        stability_penalty = -self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
-        
-        # --- 🏆 3. '속도 상한선' 보너스 계산 ---
-        
-        # 현재 전진 속도를 obs 벡터에서 가져옵니다.
-        current_velocity = obs[8]
-        
-        # 가우시안 함수를 이용해 보상 계산:
-        # 현재 속도가 target_velocity에 가까울수록 보상이 velocity_reward_weight에 가까워지고,
-        # 멀어질수록 0에 가까워집니다.
-        velocity_bonus = self.velocity_reward_weight * \
-                         np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
-                         
-        # --- 🏆 '공중 체공' 페널티 계산 ---
-        # left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
-        flight_penalty = 0
-        # if not left_foot_on_ground and not right_foot_on_ground:
-            # flight_penalty = -self.flight_penalty_weight
-
-        # 4. 모든 요소를 합산하여 최종 보상 계산
-        new_reward = (
-            velocity_bonus
-            + healthy_reward 
-            + ctrl_cost
-            + stability_penalty
-            + flight_penalty
-        )
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        # 이부분 수정하기
+        new_reward = reward
         
         return obs, new_reward, terminated, truncated, info
 

@@ -13,30 +13,46 @@ import utils
 
 ## --- 커스텀 리워드 래퍼 정의 ---
 class CustomRewardWrapper(Wrapper):
-    def __init__(self, env):
+    def __init__(self, env, flight_penalty_weight=1):
         super().__init__(env)
+        self.flight_penalty_weight = flight_penalty_weight
         
-        self.knee_bend_weight = 0.3
+        # MuJoCo 시뮬레이션에서 발과 바닥의 ID를 미리 찾아둡니다.
+        self.left_foot_geom_id = self.env.unwrapped.model.geom('foot_left_geom').id
+        self.right_foot_geom_id = self.env.unwrapped.model.geom('foot_geom').id
+        self.floor_geom_id = self.env.unwrapped.model.geom('floor').id
         
-        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
-        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
+    def _check_foot_contact(self):
+        """두 발이 바닥에 닿아있는지 확인하는 함수"""
+        left_contact = False
+        right_contact = False
         
+        for contact in self.env.unwrapped.data.contact:
+            geom_pair = {contact.geom1, contact.geom2}
+            
+            if self.left_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair:
+                left_contact = True
+            if self.right_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair:
+                right_contact = True
+        
+        return left_contact, right_contact
+
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # --- 🏆 '공중 체공' 페널티 계산 ---
+        left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
+        flight_penalty = 0
+        if not left_foot_on_ground and not right_foot_on_ground:
+            flight_penalty = -self.flight_penalty_weight
         
-        # obs[1]: 몸통 기울기, obs[10]: 몸통 회전 속도
-        tilt_penalty = -2 * np.abs(obs[1])
-        shake_penalty = -0.5 * np.abs(obs[10])
-        
-        new_reward = (
-            reward
-            + tilt_penalty
-            + shake_penalty
-        )
+
+        # 3. 기존 보상에 모든 페널티를 추가합니다.
+        new_reward = reward + flight_penalty
         
         return obs, new_reward, terminated, truncated, info
 
