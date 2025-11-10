@@ -64,8 +64,8 @@ if __name__ == "__main__":
     # --- 테스트 설정 ---
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    XML_PATH = os.path.join(current_dir, 'xml/walker2d_base.xml')
-    MODEL_PATH = "custom_2025-10-27_11-05-55/results/ppo_walker2d_best_reward.zip" 
+    XML_PATH = os.path.join(current_dir, 'xml/walker2d_stair.xml')
+    MODEL_PATH = "custom_2025-11-10_13-17-53/results/ppo_walker2d_best_distance.zip" 
     SEED = 42
     VIDEO_FOLDER = "videos_test_custom/"
     
