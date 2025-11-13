@@ -54,27 +54,14 @@ class CustomRewardWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
         
-        self.knee_bend_weight = 0.3
-        
-        self.knee_angle_min_rad = 30.0 * (np.pi / 180.0)
-        self.knee_angle_max_rad = 90.0 * (np.pi / 180.0)
-        
+
     def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        return obs, info
+        return self.env.reset(**kwargs)
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # obs[1]: 몸통 기울기, obs[10]: 몸통 회전 속도
-        tilt_penalty = -2 * np.abs(obs[1])
-        shake_penalty = -0.5 * np.abs(obs[10])
-        
-        new_reward = (
-            reward
-            + tilt_penalty
-            + shake_penalty
-        )
+        # 이부분 수정하기
+        new_reward = reward
         
         return obs, new_reward, terminated, truncated, info
 
@@ -218,7 +205,7 @@ if __name__ == "__main__":
     # xml 파일 경로 설정
     current_file_path = os.path.abspath(__file__)
     current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
+    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_stair.xml')
     
     # 시드 설정
     SEED = 42
