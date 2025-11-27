@@ -19,23 +19,6 @@ class CustomWalkerEnv(walker2d_v5.Walker2dEnv):
     # @property 데코레이터를 사용하여 is_healthy를 메서드가 아닌 속성처럼 다룹니다.
     @property
     def is_healthy(self):
-        """
-        여기에서 새로운 'healthy' 조건을 정의합니다.
-        원본 로직을 참고하여 수정하거나 완전히 새로 작성할 수 있습니다.
-        """
-        
-        # 원본 Walker2d-v5의 is_healthy 로직 (참고용)
-        # z, angle = self.data.qpos[1:3]
-
-        # min_z, max_z = self._healthy_z_range
-        # min_angle, max_angle = self._healthy_angle_range
-
-        # healthy_z = min_z < z < max_z
-        # healthy_angle = min_angle < angle < max_angle
-        # is_healthy = healthy_z and healthy_angle
-
-        # return is_healthy
-
         z, angle = self.data.qpos[1:3]
 
         min_z, max_z = (0.8, 200.0) # 수정된 z 범위
