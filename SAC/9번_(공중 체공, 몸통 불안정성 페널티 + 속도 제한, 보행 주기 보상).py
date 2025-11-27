@@ -364,4 +364,5 @@ if __name__ == "__main__":
         model_path=SAVE_PATH + "sac_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
+
     )
