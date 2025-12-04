@@ -3,7 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
 from gymnasium.wrappers import RecordVideo
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
@@ -12,17 +12,74 @@ import datetime
 import utils
 
 ## --- 커스텀 리워드 래퍼 정의 ---
-class CustomRewardWrapper(Wrapper):
+
+class PacedWalkingWrapper(Wrapper):
     def __init__(self, env):
         super().__init__(env)
+        
+        # --- 🏆 하이퍼파라미터 ---
+        self.target_velocity = 1.5
+        self.velocity_tolerance = 0.5
+        self.velocity_reward_weight = 2.0
+        self.stability_weight = 0.3
+        self.flight_penalty_weight = 1.25
+        self.swing_bend_weight = 0.25
+    
+
+        # 발과 바닥의 ID
+        self.left_foot_geom_id = self.env.unwrapped.model.geom('foot_left_geom').id
+        self.right_foot_geom_id = self.env.unwrapped.model.geom('foot_geom').id
+        self.floor_geom_id = self.env.unwrapped.model.geom('floor').id
+        
+    def _check_foot_contact(self):
+        left_contact, right_contact = False, False
+        for contact in self.env.unwrapped.data.contact:
+            geom_pair = {contact.geom1, contact.geom2}
+            if self.left_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair: left_contact = True
+            if self.right_foot_geom_id in geom_pair and self.floor_geom_id in geom_pair: right_contact = True
+        return left_contact, right_contact
 
     def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        # 이부분 수정하기
-        new_reward = reward
+        obs, original_reward, terminated, truncated, info = self.env.step(action)
+
+        healthy_reward = info.get('reward_survive', 1.0)
+        ctrl_cost = info.get('reward_ctrl', 0)
+        stability_penalty = -self.stability_weight * (np.abs(obs[1]) + 0.1 * np.abs(obs[10]))
+        
+        current_velocity = obs[8]
+        velocity_bonus = self.velocity_reward_weight * \
+                         np.exp(-np.square(current_velocity - self.target_velocity) / (2 * np.square(self.velocity_tolerance)))
+        
+        left_foot_on_ground, right_foot_on_ground = self._check_foot_contact()
+        flight_penalty = 0
+        if not left_foot_on_ground and not right_foot_on_ground:
+            flight_penalty = -self.flight_penalty_weight
+            
+        swing_bend_reward = 0
+        
+        # 1. 왼쪽 다리 스윙 단계: (왼발 OFF 👟) & (오른발 ON 🦶)
+        if not left_foot_on_ground and right_foot_on_ground:
+            swing_bend_reward += np.abs(obs[4])
+            
+        # 2. 오른쪽 다리 스윙 단계: (오른발 OFF 👟) & (왼발 ON 🦶)
+        if not right_foot_on_ground and left_foot_on_ground:
+            swing_bend_reward += np.abs(obs[7])
+
+        # 3. 가중치 적용
+        knee_bend_reward = self.swing_bend_weight * swing_bend_reward
+
+        new_reward = (
+            velocity_bonus
+            + healthy_reward
+            + ctrl_cost
+            + stability_penalty
+            + flight_penalty
+            + knee_bend_reward
+        )
         
         return obs, new_reward, terminated, truncated, info
 
@@ -102,12 +159,11 @@ class AdvancedEvalCallback(BaseCallback):
         return True
 
 ## --- 모델 테스트와 영상 녹화 ---
-def test_model(xml, model_path, seed, video_folder):
+def test_model(model_path, seed, video_folder):
     print(f"--- '{model_path}' 모델 테스트 시작 (시드: {seed}) ---")
     
     # 환경 생성
-    custom_xml_path = xml
-    env = gym.make("Walker2d-v5", render_mode="rgb_array", xml_file=custom_xml_path)
+    env = gym.make("Walker2d-v5", render_mode="rgb_array")
     
     # 비디오 녹화 래퍼 적용
     os.makedirs(video_folder, exist_ok=True)
@@ -117,7 +173,7 @@ def test_model(xml, model_path, seed, video_folder):
     
     # 훈련된 모델 불러오기
     set_random_seed(seed)
-    model = PPO.load(model_path, env=env)
+    model = SAC.load(model_path, env=env)
     
     # 평가 시작
     obs, info = env.reset(seed=seed)
@@ -155,31 +211,26 @@ def test_model(xml, model_path, seed, video_folder):
 
 # --- 메인 훈련 코드 ---
 if __name__ == "__main__":
-    FOLDER_NAME = "custom_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    FOLDER_NAME = "custom_SAC_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     SAVE_PATH = FOLDER_NAME + f"/results/"
     TENSORBOARD_PATH = FOLDER_NAME + "/tensorboard/"
     VIDEO_PATH = FOLDER_NAME + "/videos/"
     TOTAL_TIMESTEPS = 3000000
-    
-    # xml 파일 경로 설정
-    current_file_path = os.path.abspath(__file__)
-    current_dir = os.path.dirname(current_file_path)
-    custom_xml_path = os.path.join(current_dir, 'xml/walker2d_slope.xml')
     
     # 시드 설정
     SEED = 42
     utils.set_seed(SEED)
 
     # 훈련용 환경
-    train_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
+    train_env = gym.make("Walker2d-v5")
     train_env = Monitor(train_env, SAVE_PATH)
-    train_env = CustomRewardWrapper(env=train_env)
+    train_env = PacedWalkingWrapper(env=train_env)
     train_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     train_env.action_space.seed(SEED)
 
     # 평가용 환경
-    eval_env = gym.make("Walker2d-v5", xml_file=custom_xml_path)
-    eval_env = CustomRewardWrapper(env=eval_env)
+    eval_env = gym.make("Walker2d-v5")
+    eval_env = PacedWalkingWrapper(env=eval_env)
     eval_env.reset(seed=SEED) # 환경 초기화 시 시드 설정
     eval_env.action_space.seed(SEED)
 
@@ -196,7 +247,7 @@ if __name__ == "__main__":
         verbose=1)
 
     # 모델 생성하기
-    model = PPO(
+    model = SAC(
         "MlpPolicy", 
         train_env, 
         verbose=1, 
@@ -209,11 +260,11 @@ if __name__ == "__main__":
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         callback=callback,
-        tb_log_name="ppo_walker2d"
+        tb_log_name="sac_walker2d"
     )
 
     # 최종 모델 저장하기
-    model.save(f"{SAVE_PATH}ppo_walker2d_final.zip")
+    model.save(f"{SAVE_PATH}sac_walker2d_final.zip")
     print("최종 모델 저장이 완료되었습니다.")
 
     train_env.close()
@@ -221,26 +272,22 @@ if __name__ == "__main__":
 
     # 테스트
     test_model(
-        xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_distance",
+        model_path=SAVE_PATH + "sac_walker2d_best_distance",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_stability",
+        model_path=SAVE_PATH + "sac_walker2d_best_stability",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_best_reward",
+        model_path=SAVE_PATH + "sac_walker2d_best_reward",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
     test_model(
-        xml=custom_xml_path,
-        model_path=SAVE_PATH + "ppo_walker2d_final",
+        model_path=SAVE_PATH + "sac_walker2d_final",
         seed=SEED,
         video_folder=VIDEO_PATH
     )
